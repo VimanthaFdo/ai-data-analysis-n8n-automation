@@ -1,0 +1,197 @@
+{
+  "name": "AI Data Analysis and Email Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "AI Data Analysis",
+        "formDescription": "Upload a CSV dataset to automatically analyze the data and receive an email report.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Upload CSV Dataset",
+              "fieldType": "file"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        0
+      ],
+      "id": "1749079d-f805-4dc6-b44d-e81c7db73f89",
+      "name": "On form submission",
+      "webhookId": "565ff0e2-6395-4d88-804d-278005746b0f"
+    },
+    {
+      "parameters": {
+        "binaryPropertyName": "Upload_CSV_Dataset",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        0
+      ],
+      "id": "6fd08720-9b01-4ff0-9dbb-c3000b7451ca",
+      "name": "Parse CSV"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(item => item.json);\n\nconst cleanRows = rows.filter(row =>\n  Object.values(row).some(value => value !== null && value !== \"\")\n);\n\nconst processedRows = cleanRows.map(row => {\n  const newRow = { ...row };\n\n  for (const key of Object.keys(newRow)) {\n    const value = newRow[key];\n\n    if (\n      typeof value === \"string\" &&\n      value.trim() !== \"\" &&\n      !isNaN(value)\n    ) {\n      newRow[key] = Number(value);\n    }\n  }\n\n  return newRow;\n});\n\nconst columns = Object.keys(processedRows[0] || {});\n\nconst numericColumns = columns.filter(column =>\n  processedRows.some(row => typeof row[column] === \"number\")\n);\n\nconst statistics = {};\n\nfor (const column of numericColumns) {\n\n  const values = processedRows\n    .map(row => row[column])\n    .filter(value => typeof value === \"number\" && !isNaN(value));\n\n  if (values.length === 0) continue;\n\n  const total = values.reduce((sum, value) => sum + value, 0);\n\n  const mean = total / values.length;\n\n  const min = Math.min(...values);\n  const max = Math.max(...values);\n\n  statistics[column] = {\n    count: values.length,\n    sum: total,\n    mean: mean,\n    min: min,\n    max: max\n  };\n}\n\nreturn [{\n  json: {\n    row_count: processedRows.length,\n    column_count: columns.length,\n    columns,\n    numeric_columns: numericColumns,\n    statistics,\n    sample_data: processedRows.slice(0, 10),\n    data: processedRows\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "5d1d55eb-3cc1-459c-9f85-ccb6402a3961",
+      "name": "Data Preprocessing"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4.1",
+          "mode": "list",
+          "cachedResultName": "GPT-4.1"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=You are an experienced business data analyst.\n\nAnalyze the dataset provided below.\n\nYour task is to produce a professional business analysis.\n\nRules:\n\n1. Only use information contained in the supplied dataset and statistics.\n2. Do not invent numbers.\n3. Identify important trends.\n4. Identify the most important KPIs.\n5. Identify unusual or potentially interesting observations.\n6. Explain the findings in simple business language.\n7. Suggest practical areas that management could investigate.\n8. If the data is insufficient to make a conclusion, explicitly say so.\n\nDataset information:\n\n{{ JSON.stringify($json) }}\n\nReturn the analysis using these sections:\n\nExecutive Summary\n\nKey Metrics\n\nKey Findings\n\nTrends\n\nPotential Issues\n\nRecommended Actions"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        672,
+        0
+      ],
+      "id": "4ed694f9-5ae7-43c7-8d39-d3925b03296f",
+      "name": "AI Data Analyst",
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawText = \n  $json.output?.[0]?.content?.[0]?.text \n  || $json.text \n  || $json.output \n  || $json.response \n  || \"\";\n\n// --- Simple Markdown → HTML converter ---\nfunction markdownToHtml(md) {\n  let html = md;\n\n  // Escape existing HTML tags first\n  html = html.replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\");\n\n  // Headers\n  html = html.replace(/^### (.*$)/gim, '<h3 style=\"color:#2c3e50; margin-top:24px;\">$1</h3>');\n  html = html.replace(/^## (.*$)/gim, '<h2 style=\"color:#1a1a2e; border-bottom:2px solid #4a90d9; padding-bottom:6px; margin-top:32px;\">$1</h2>');\n  html = html.replace(/^# (.*$)/gim, '<h1 style=\"color:#1a1a2e;\">$1</h1>');\n\n  // Bold\n  html = html.replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>');\n\n  // Horizontal rules\n  html = html.replace(/^---$/gim, '<hr style=\"border:none; border-top:1px solid #e0e0e0; margin:24px 0;\">');\n\n  // Tables (basic markdown tables)\n  html = html.replace(/((?:^\\|.*\\|\\n?)+)/gim, (tableBlock) => {\n    const rows = tableBlock.trim().split(\"\\n\").filter(r => r.trim() !== \"\");\n    if (rows.length < 2) return tableBlock;\n\n    const headerCells = rows[0].split(\"|\").map(c => c.trim()).filter(Boolean);\n    const bodyRows = rows.slice(2); // skip header separator row (---|---)\n\n    let table = '<table style=\"width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;\">';\n    table += '<thead><tr>';\n    headerCells.forEach(cell => {\n      table += `<th style=\"background:#4a90d9; color:#fff; padding:10px; text-align:left; border:1px solid #ddd;\">${cell}</th>`;\n    });\n    table += '</tr></thead><tbody>';\n\n    bodyRows.forEach((row, i) => {\n      const cells = row.split(\"|\").map(c => c.trim()).filter(Boolean);\n      const bg = i % 2 === 0 ? \"#f9fbfd\" : \"#ffffff\";\n      table += `<tr style=\"background:${bg};\">`;\n      cells.forEach(cell => {\n        table += `<td style=\"padding:10px; border:1px solid #ddd;\">${cell}</td>`;\n      });\n      table += '</tr>';\n    });\n\n    table += '</tbody></table>';\n    return table;\n  });\n\n  // Bullet lists\n  html = html.replace(/^\\s*-\\s+(.*$)/gim, '<li style=\"margin-bottom:6px;\">$1</li>');\n  html = html.replace(/(<li.*<\\/li>\\n?)+/g, (match) => `<ul style=\"padding-left:20px;\">${match}</ul>`);\n\n  // Line breaks / paragraphs (only for lines not already wrapped in a tag)\n  html = html\n    .split(\"\\n\")\n    .map(line => {\n      const trimmed = line.trim();\n      if (trimmed === \"\" || /^<(h1|h2|h3|hr|table|ul|li|thead|tbody|tr|th|td)/.test(trimmed)) {\n        return trimmed;\n      }\n      return `<p style=\"line-height:1.6; color:#333; margin:8px 0;\">${trimmed}</p>`;\n    })\n    .join(\"\\n\");\n\n  return html;\n}\n\nconst analysisHtml = markdownToHtml(rawText);\n\nconst html = `\n<html>\n<body style=\"font-family: 'Segoe UI', Arial, sans-serif; background:#f4f6f8; padding:24px; margin:0;\">\n  <div style=\"max-width:700px; margin:0 auto; background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,0.08);\">\n    \n    <div style=\"background:linear-gradient(135deg,#4a90d9,#2c5f9e); padding:28px 32px;\">\n      <h1 style=\"color:#fff; margin:0; font-size:24px;\">📊 AI Data Analysis Report</h1>\n      <p style=\"color:#dce8f7; margin:6px 0 0; font-size:14px;\">Automated insight generated from your submitted dataset</p>\n    </div>\n\n    <div style=\"padding:28px 32px;\">\n      <p style=\"color:#333;\">Hello,</p>\n      <p style=\"color:#333;\">Please find below the automated analysis of the submitted dataset.</p>\n\n      ${analysisHtml}\n\n      <hr style=\"border:none; border-top:1px solid #e0e0e0; margin:28px 0 16px;\">\n      <p style=\"font-size:12px; color:#999; text-align:center;\">\n        This report was automatically generated using n8n and OpenAI.\n      </p>\n    </div>\n  </div>\n</body>\n</html>\n`;\n\nreturn [{\n  json: {\n    subject: \"📊 Automated Data Analysis Report\",\n    email_html: html,\n    analysis: rawText\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "48da3da0-0ca2-4183-92c1-53c456956ab4",
+      "name": "Create HTML Email"
+    },
+    {
+      "parameters": {
+        "sendTo": "your-email@example.com",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.email_html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1264,
+        0
+      ],
+      "id": "09154d84-3b54-41d7-bb8e-6121b52592ff",
+      "name": "Send Analysis Email",
+      "webhookId": "caec9545-561a-4075-9be8-63b2e18f9c99",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "wfs3WW44RqvtNUbv",
+          "name": "Gmail account 2"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Parse CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse CSV": {
+      "main": [
+        [
+          {
+            "node": "Data Preprocessing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data Preprocessing": {
+      "main": [
+        [
+          {
+            "node": "AI Data Analyst",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Data Analyst": {
+      "main": [
+        [
+          {
+            "node": "Create HTML Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create HTML Email": {
+      "main": [
+        [
+          {
+            "node": "Send Analysis Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "2ca63b3f-90f6-4e74-a84f-aceb977caee0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c271091a0500f8c39131d9fc1c710dbdaf4e10ab592ec93b8f936656da89fbf1"
+  },
+  "nodeGroups": [],
+  "id": "7elgrzb4o2bAQmdq",
+  "tags": []
+}
